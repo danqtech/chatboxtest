@@ -1,11 +1,20 @@
 const OpenAI = require('openai')
 
+export const runtime = 'edge'
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_KEY,
 })
 
 export async function POST(req: Request) {
-  const { message, preferences } = await req.json()
+  let message, preferences
+  try {
+    const body = await req.json()
+    message = body.message
+    preferences = body.preferences
+  } catch (error) {
+    return new Response('Invalid JSON', { status: 400 })
+  }
   
   const messages = [{ role: 'user', content: message }]
   
