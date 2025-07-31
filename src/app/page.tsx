@@ -1,8 +1,34 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+interface ChatState {
+  country: string
+  continent: string
+  destination: string
+  onboardingComplete: boolean
+  currentQuestion: number
+}
+
+const questions = [
+  'What is your favorite country?',
+  'What is your favorite continent?',
+  'What is your favorite destination?'
+]
+
 export default function Home() {
-  const [messages, setMessages] = useState<string[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', content: questions[0] }])
+  const [chatState, setChatState] = useState<ChatState>({
+    country: '',
+    continent: '',
+    destination: '',
+    onboardingComplete: false,
+    currentQuestion: 0
+  })
   const [input, setInput] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
 
@@ -10,28 +36,65 @@ export default function Home() {
 
   async function send() {
     if (!input.trim()) return
-    const user = input.trim()
-    setMessages(prev => [...prev, user])
+    const userMessage = input.trim()
+    
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }])
     setInput('')
 
-    const res = await fetch('/api/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: user })
-    })
+    if (!chatState.onboardingComplete) {
+      const newState = { ...chatState }
+      
+      if (chatState.currentQuestion === 0) {
+        newState.country = userMessage
+        newState.currentQuestion = 1
+        setMessages(prev => [...prev, { role: 'assistant', content: questions[1] }])
+      } else if (chatState.currentQuestion === 1) {
+        newState.continent = userMessage
+        newState.currentQuestion = 2
+        setMessages(prev => [...prev, { role: 'assistant', content: questions[2] }])
+      } else if (chatState.currentQuestion === 2) {
+        newState.destination = userMessage
+        newState.onboardingComplete = true
+        setMessages(prev => [...prev, { role: 'assistant', content: 'Great! Now I can help you with geography questions.' }])
+      }
+      
+      setChatState(newState)
+      return
+    }
 
-    if (!res.body) return
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let ai = ''
-    setMessages(prev => [...prev, ''])
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) break
-      ai += decoder.decode(value)
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }])
+
+    try {
+      const res = await fetch('/api/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMessage, preferences: chatState })
+      })
+
+      if (!res.body) return
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value)
+        setMessages(prev => {
+          const copy = [...prev]
+          copy[copy.length - 1] = {
+            ...copy[copy.length - 1],
+            content: copy[copy.length - 1].content + chunk
+          }
+          return copy
+        })
+      }
+    } catch (error) {
       setMessages(prev => {
         const copy = [...prev]
-        copy[copy.length - 1] = ai
+        const lastMessage = copy[copy.length - 1]
+        if (lastMessage.role === 'assistant') {
+          lastMessage.content = 'Error: Failed to get response'
+        }
         return copy
       })
     }
@@ -43,9 +106,9 @@ export default function Home() {
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`max-w-[75%] break-words ${i % 2 === 0 ? 'self-end bg-blue-600 text-white' : 'self-start bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-gray-50'} rounded-md px-3 py-1`}
+            className={`max-w-[75%] break-words ${m.role === 'user' ? 'self-end bg-blue-600 text-white' : 'self-start bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-gray-50'} rounded-md px-3 py-1`}
           >
-            {m}
+            {m.content}
           </div>
         ))}
         <div ref={endRef} />
